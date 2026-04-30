@@ -1,6 +1,7 @@
 # RAVI Haber Merkezi
 
-Bu çalışma, Python dili ve Tkinter arayüz kütüphanesi kullanılarak geliştirilmiş bir RSS haber okuma uygulamasıdır. Projenin temel amacı, farklı haber kaynaklarından alınan verileri tek bir merkezde toplayarak kullanıcıya kişiselleştirilmiş bir okuma deneyimi sunmaktır.
+Bu çalışma, Python dili ve Tkinter arayüz kütüphanesi kullanılarak geliştirilmiş bir RSS haber okuma uygulamasıdır.
+Projenin temel maksadı, farklı haber kaynaklarından alınan verileri tek bir merkezde toplayarak kullanıcıya kişiselleştirilmiş haber deneyimi sunmaktır.
 
 ## Projenin Özellikleri
 - Kullanıcı yetkilendirme (kayıt ve giriş) sistemi.
@@ -24,6 +25,6 @@ Uygulama çalıştırıldığında kullanıcıyı önce giriş ekranı karşıla
 
 ## Dosya İçerikleri ve Yapısı
 - hesap_aç.py: Uygulamanın başlangıç dosyasıdır. Giriş ve kayıt fonksiyonlarını içerir.
-- ana_dosya.py: Haber kaynaklarının yönetimini ve kategori seçimlerini sağlar.
+- ana_dosya.py: Haber kaynaklarının idaresi ve kategori tercihlerini sağlar.
 - Haber_paneli.py: Haberlerin listelendiği ve içeriklerin okunduğu arayüzdür.
 - giriş/: Uygulama arayüzünde kullanılan görselleri barındıran dizindir.
