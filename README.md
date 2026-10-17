@@ -1,30 +1,36 @@
-# RAVI Haber Merkezi
+RAVI Haber Merkezi
 
-Bu çalışma, Python dili ve Tkinter arayüz kütüphanesi kullanılarak geliştirilmiş bir RSS haber okuma uygulamasıdır.
-Projenin temel maksadı, farklı haber kaynaklarından alınan verileri tek bir merkezde toplayarak kullanıcıya kişiselleştirilmiş haber deneyimi sunmaktır.
+Python ve Tkinter ile yazılmış RSS haber okuyucu. Birden fazla haber kaynağını tek ekranda toplar.
 
-## Projenin Özellikleri
-- Kullanıcı yetkilendirme (kayıt ve giriş) sistemi.
-- Kullanıcı tercihlerinin ve bilgilerinin JSON formatında yerel olarak depolanması.
-- RSS (Rich Site Summary) teknolojisi ile anlık haber çekimi.
-- Kategori bazlı haber filtreleme (Gündem, Teknoloji, Ekonomi vb.).
-- Haber detaylarını görüntüleme ve kaynak siteye yönlendirme.
+Özellikler
+Kayıt / giriş sistemi; "Beni hatırla" ile oturum açık kalır, uygulama açılınca doğrudan haber ekranı gelir
+Haber ekranından Ayarlar: haber kaynaklarını değiştirme, özel RSS ekleme, koyu mod, çıkış yap
+Kategori bazlı haber seçimi (NTV, TRT, CNN Türk, BBC Türkçe, teknoloji siteleri)
+Haberler arka planda yüklenir, pencere donmaz
+Windows ve Linux için Python kurmadan çalışan tek dosyalık sürüm
+Kullanıcılar için (Python gerekmez)
 
-## Gereksinimler
-Uygulamanın çalışabilmesi için sistemde Python yüklü olmalı ve haber akışlarını işleyebilmek için gerekli olan feedparser kütüphanesi kurulmalıdır:
+GitHub'daki Actions sekmesinden son derlemeyi ya da Releases bölümünü açın:
 
-pip install feedparser
+Windows: RAVI.exe dosyasına çift tıklayın.
+Linux: tar -xzf RAVI-linux.tar.gz && ./RAVI
+Geliştiriciler için
+pip install -r requirements.txt
+python ravi.py
 
-## Çalıştırma Talimatı
-Proje birbiriyle etkileşimli modüllerden oluşmaktadır. Uygulamanın veri tutarlılığını sağlaması ve oturum yönetimini doğru yapabilmesi için mutlaka ana giriş dosyasından başlatılması gerekir.
+Veriler (kullanıcılar, oturum, tema) çalışma klasörüne değil kullanıcı veri klasörüne yazılır: Windows %APPDATA%\RAVI, Linux ~/.config/ravi.
 
-Başlatma komutu:
-python hesap_aç.py
+Kendi bilgisayarında derleme
+pip install pyinstaller
+pyinstaller --noconfirm ravi.spec
 
-Uygulama çalıştırıldığında kullanıcıyı önce giriş ekranı karşılar. Kimlik doğrulaması yapıldıktan sonra haber seçim paneline geçiş yapılır.
+PyInstaller çapraz derleme yapmaz: Windows sürümü Windows'ta, Linux sürümü Linux'ta derlenir (Linux'ta önce sudo apt install python3-tk). İkisini de otomatik üretmek için .github/workflows/derle.yml kullanılır.
 
-## Dosya İçerikleri ve Yapısı
-- hesap_aç.py: Uygulamanın başlangıç dosyasıdır. Giriş ve kayıt fonksiyonlarını içerir.
-- ana_dosya.py: Haber kaynaklarının idaresi ve kategori tercihlerini sağlar.
-- Haber_paneli.py: Haberlerin listelendiği ve içeriklerin okunduğu arayüzdür.
-- giriş/: Uygulama arayüzünde kullanılan görselleri barındıran dizindir.
+Pencere simgesi için ravi_logo.ico (Windows) ve ravi_logo.png (Linux) dosyalarını ravi.py'nin yanına koyun.
+
+Dosyalar
+Dosya	Görevi
+ravi.py	Uygulama: giriş, haber ve ayar ekranları
+depo.py	Kullanıcılar, kalıcı oturum, ayarların saklanması
+kaynaklar.py	Sabit RSS kaynak listesi
+ravi.spec	PyInstaller derleme tarifi
