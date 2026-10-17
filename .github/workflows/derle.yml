@@ -1,0 +1,49 @@
+name: Derle (Windows + Linux)
+
+on:
+  workflow_dispatch:        # Actions sekmesinden elle başlat
+  push:
+    tags: ["v*"]            # veya  git tag v1.0 && git push --tags
+
+jobs:
+  derle:
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: windows-latest
+            ad: RAVI-windows
+            dosya: dist/RAVI.exe
+          - os: ubuntu-22.04      # eski sürüm: Linux'ta daha geniş uyumluluk için
+            ad: RAVI-linux
+            dosya: dist/RAVI-linux.tar.gz
+    runs-on: ${{ matrix.os }}
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Tk kütüphanesi (Linux)
+        if: runner.os == 'Linux'
+        run: sudo apt-get update && sudo apt-get install -y python3-tk
+
+      - name: Bağımlılıklar
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt "pyinstaller>=6.0"
+          python -c "import tkinter, feedparser; print('tkinter + feedparser tamam')"
+
+      - name: Derle
+        run: pyinstaller --noconfirm ravi.spec
+
+      - name: Linux paketle (çalıştırma izni korunsun)
+        if: runner.os == 'Linux'
+        run: tar -czf dist/RAVI-linux.tar.gz -C dist RAVI
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: ${{ matrix.ad }}
+          path: ${{ matrix.dosya }}
