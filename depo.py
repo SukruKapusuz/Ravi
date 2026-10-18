@@ -16,6 +16,8 @@ import secrets
 import shutil
 import sys
 
+import mizan
+
 _SIFRE_ON_EK = "pbkdf2$"
 _TUR = 200_000
 
@@ -37,6 +39,7 @@ VERI_KLASORU = veri_klasoru()
 KULLANICILAR = os.path.join(VERI_KLASORU, "kullanicilar.json")
 OTURUM = os.path.join(VERI_KLASORU, "oturum.json")
 AYARLAR = os.path.join(VERI_KLASORU, "ayarlar.json")
+PROFIL = os.path.join(VERI_KLASORU, "profil.json")
 
 
 # ------------------------------------------------------------- dosya işleri
@@ -205,3 +208,41 @@ def ayar_yaz(anahtar, deger):
     ayarlar = _json_oku(AYARLAR, {})
     ayarlar[anahtar] = deger
     _json_yaz(AYARLAR, ayarlar)
+
+
+# ------------------------------------------------- öğrenilen ilgi alanları
+# Okuma alışkanlıkları şifre dosyasına karışmasın diye ayrı dosyada (profil.json) tutulur.
+def _tur_uygun(deger, ornek):
+    if isinstance(ornek, bool):
+        return isinstance(deger, bool)
+    if isinstance(ornek, float):
+        return isinstance(deger, (int, float)) and not isinstance(deger, bool)
+    return isinstance(deger, type(ornek))
+
+
+def profil_oku(isim):
+    """Kullanıcının profilini döner. Eksik ya da bozuk alanlar varsayılanla doldurulur."""
+    profil = mizan.bos_profil()
+    tum = _json_oku(PROFIL, {})
+    ham = tum.get(isim) if isinstance(tum, dict) else None
+    if isinstance(ham, dict):
+        for anahtar, varsayilan in profil.items():
+            deger = ham.get(anahtar, varsayilan)
+            if _tur_uygun(deger, varsayilan):
+                profil[anahtar] = deger
+    return profil
+
+
+def profil_yaz(isim, profil):
+    tum = _json_oku(PROFIL, {})
+    if not isinstance(tum, dict):
+        tum = {}
+    tum[isim] = profil
+    _json_yaz(PROFIL, tum)
+
+
+def profil_sifirla(isim):
+    """Öğrenilen her şeyi siler; 'öğrenme açık/kapalı' tercihi korunur."""
+    yeni = mizan.bos_profil()
+    yeni["ogrenme"] = profil_oku(isim)["ogrenme"]
+    profil_yaz(isim, yeni)
