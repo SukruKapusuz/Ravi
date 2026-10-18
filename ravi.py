@@ -13,6 +13,7 @@ import queue
 import socket
 import sys
 import threading
+import time
 import webbrowser
 import tkinter as tk
 from concurrent.futures import ThreadPoolExecutor
@@ -21,6 +22,7 @@ from tkinter import messagebox
 import feedparser
 
 import depo
+import mizan
 from kaynaklar import HABER_ISTASYONU, OZEL_ON_EK
 
 socket.setdefaulttimeout(10)  # cevap vermeyen bir RSS kaynağı akışı kilitlemesin
@@ -214,6 +216,7 @@ class HaberEkrani(Ekran):
     def __init__(self, app):
         super().__init__(app)
         self._nesil = 0
+        self.profil = mizan.bos_profil()
 
     def kur(self):
         t = self.app.t
@@ -241,6 +244,9 @@ class HaberEkrani(Ekran):
         self._nesil += 1
         nesil = self._nesil
         self._temizle("Haberler yükleniyor…")
+        self.profil = depo.profil_oku(self.app.kullanici)
+        if self.profil["ogrenme"] and mizan.sogut(self.profil):
+            depo.profil_yaz(self.app.kullanici, self.profil)
         kaynaklar = depo.tercihleri_oku(self.app.kullanici)
         kuyruk = queue.Queue()
         threading.Thread(target=self._arka_plan, args=(kaynaklar, kuyruk), daemon=True).start()
@@ -252,8 +258,12 @@ class HaberEkrani(Ekran):
         def cek(k):
             try:
                 besleme = feedparser.parse(k["url"])
-                return [(k["ad"], h.get("title", "(başlıksız)"), h.get("link", ""))
-                        for h in besleme.entries[:5]]
+                return [{"kaynak": k["ad"],
+                         "baslik": (h.get("title") or "(başlıksız)").strip(),
+                         "link": h.get("link", ""),
+                         "tarih": mizan.tarih_zamani(
+                             h.get("published_parsed") or h.get("updated_parsed"))}
+                        for h in besleme.entries[:10]]
             except Exception:
                 return []
 
@@ -276,19 +286,45 @@ class HaberEkrani(Ekran):
 
     def _kartlari_ciz(self, sonuc):
         t = self.app.t
-        self._temizle("" if sonuc else "Haber alınamadı. İnternet bağlantınızı veya kaynak "
+        ogrenme = self.profil["ogrenme"]
+        liste = mizan.sirala(sonuc, self.profil if ogrenme else mizan.bos_profil())
+        self._temizle("" if liste else "Haber alınamadı. İnternet bağlantınızı veya kaynak "
                                        "seçimlerinizi (⚙ Ayarlar) kontrol edin.")
-        for kaynak, baslik, link in sonuc:
+        for haber in liste:
             kart = tk.Frame(self.alan.icerik, bg=t["kart"], padx=15, pady=12)
             kart.pack(fill="x", padx=20, pady=6)
-            self.etiket(kart, kaynak, 8, True, "soluk").pack(anchor="w")
-            self.etiket(kart, baslik, 11, True, wraplength=560, justify="left").pack(
-                anchor="w", pady=(2, 0))
-            if link:
+
+            satir = tk.Frame(kart, bg=t["kart"])
+            satir.pack(fill="x")
+            self.etiket(satir, haber["kaynak"], 8, True, "soluk").pack(side="left")
+            if ogrenme:  # "Gizle" bir öğrenme eylemidir; öğrenme kapalıyken gösterilmez
+                gizle = self.etiket(satir, "✕ Gizle", 8, True, "soluk")
+                gizle.configure(cursor="hand2")
+                gizle.pack(side="right")
+                gizle.bind("<Button-1>", lambda e, h=haber, k=kart: self._gizle(h, k))
+
+            baslik = self.etiket(kart, haber["baslik"], 11, True,
+                                 "soluk" if haber["okundu"] else "yazi",
+                                 wraplength=560, justify="left")
+            baslik.pack(anchor="w", pady=(2, 0))
+
+            if haber["link"]:
                 git = self.etiket(kart, "Haberi internette gör ➔", 9, True, "link")
                 git.configure(cursor="hand2")
                 git.pack(anchor="e", pady=(8, 0))
-                git.bind("<Button-1>", lambda e, s=link: webbrowser.open(s))
+                git.bind("<Button-1>", lambda e, h=haber, b=baslik: self._ac(h, b))
+
+    def _ac(self, haber, baslik_etiketi):
+        webbrowser.open(haber["link"])
+        if self.profil["ogrenme"]:
+            mizan.ogren(self.profil, haber, "ac")
+            depo.profil_yaz(self.app.kullanici, self.profil)
+            baslik_etiketi.configure(fg=self.app.t["soluk"])  # okundu: soluk renk
+
+    def _gizle(self, haber, kart):
+        mizan.ogren(self.profil, haber, "gizle")
+        depo.profil_yaz(self.app.kullanici, self.profil)
+        kart.destroy()
 
 
 # ======================================================================= AYARLAR
@@ -300,11 +336,15 @@ class AyarEkrani(Ekran):
         self.secili = {k["url"] for k in kayitli}
         self.ozel = {k["url"]: k["ad"] for k in kayitli if k["ad"].startswith(OZEL_ON_EK)}
         self.vars = {}
+        self.ogrenme = depo.profil_oku(app.kullanici)["ogrenme"]
+        self.ogren_var = None
 
     # --- durum
     def _durumu_topla(self):
         if self.vars:
             self.secili = {url for url, var in self.vars.items() if var.get()}
+        if self.ogren_var is not None:
+            self.ogrenme = bool(self.ogren_var.get())
 
     def yenile(self):
         self._durumu_topla()  # tema değişince işaretlenmiş kutular kaybolmasın
@@ -386,6 +426,17 @@ class AyarEkrani(Ekran):
         self.dugme(form, "Listeye Ekle", self._ozel_ekle, "turuncu").grid(
             row=2, column=1, sticky="e", pady=(6, 0))
 
+        # -- kişiselleştirme
+        self._baslik(ic, "KİŞİSELLEŞTİRME", "vurgu", ust_bosluk=18)
+        self.ogren_var = tk.IntVar(value=1 if self.ogrenme else 0)
+        self.kutu(ic, "Okuduklarımdan öğren, haberleri ilgi alanıma göre sırala",
+                  self.ogren_var).pack(anchor="w", padx=36)
+        self.etiket(ic, "Kapalıyken tıklamalarınız kaydedilmez ve sıralamada kullanılmaz.\n"
+                        "Öğrenilenler yalnızca bu bilgisayarda kalır.", 8, renk="soluk",
+                    justify="left").pack(anchor="w", padx=36)
+        self.dugme(ic, "Öğrenilenleri Sıfırla", self._sifirla).pack(
+            anchor="w", padx=36, pady=(8, 0))
+
         # -- hesap
         self._baslik(ic, "HESAP", "vurgu", ust_bosluk=18)
         self.etiket(ic, f"Giriş yapan: {self.app.kullanici}", 10, renk="soluk").pack(
@@ -424,6 +475,13 @@ class AyarEkrani(Ekran):
         self.ad_giris.delete(0, tk.END)
         self.link_giris.delete(0, tk.END)
 
+    def _sifirla(self):
+        if messagebox.askyesno("Öğrenilenleri sıfırla",
+                               "İlgi alanlarınız, okuduklarınız ve gizlediğiniz haberler "
+                               "silinecek. Emin misiniz?"):
+            depo.profil_sifirla(self.app.kullanici)
+            messagebox.showinfo("Tamam", "Öğrenilenler silindi.")
+
     def _kaydet(self):
         self._durumu_topla()
         final = []
@@ -438,6 +496,10 @@ class AyarEkrani(Ekran):
             messagebox.showwarning("Seçim yok", "Lütfen en az bir haber kaynağı seçin!")
             return
         depo.tercihleri_kaydet(self.app.kullanici, final)
+        profil = depo.profil_oku(self.app.kullanici)
+        if profil["ogrenme"] != self.ogrenme:
+            profil["ogrenme"] = self.ogrenme
+            depo.profil_yaz(self.app.kullanici, profil)
         self.app.ekran_goster(HaberEkrani)
 
 
