@@ -9,15 +9,18 @@ Puan formülü:
                   + güncellik bonusu - (okunmuşsa 50)
 """
 import calendar
-import math
 import re
 import time
 
 # ----------------------------------------------------------------- ayarlar
-AZAMI_HABER = 40            # ekranda en fazla kaç haber gösterilir
-UST_ORAN = 0.8              # listenin %80'i en yüksek puanlılardan, kalanı keşif
-KESIF_KAYNAK_BASINA = 2     # keşif bölümünde bir kaynaktan en fazla kaç haber
-KESIF_ARALIK = 5            # keşif haberleri her 5. sıraya serpiştirilir
+# "Seçilen Haberler" ve "Keşfet" artık ayrı sekmeler olduğundan iki ayrı havuz
+# hesaplanır. Havuzlar SAYFA_BOYUTU'ndan büyük tutulur; "Daha Fazla Göster"
+# yeni bir ağ isteği yapmadan bu havuzun bir sonraki dilimini açar.
+HAVUZ_SECILEN = 150         # Seçilen Haberler'de biriktirilen aday sayısı
+HAVUZ_KESIF = 60            # Keşfet'te biriktirilen aday sayısı
+KESIF_KAYNAK_BASINA = 4     # Keşfet'te bir kaynaktan en fazla kaç haber
+SAYFA_BOYUTU_SECILEN = 20   # her "Daha Fazla Göster" tıklamasında açılan haber sayısı
+SAYFA_BOYUTU_KESIF = 10
 
 KAYNAK_CARPANI = 1.5
 OKUNMUS_CEZASI = 50.0
@@ -100,15 +103,9 @@ def puan_hesapla(haber, profil, simdi, okundu=False):
     return puan - (OKUNMUS_CEZASI if okundu else 0.0)
 
 
-def sirala(haberler, profil, simdi=None, azami=AZAMI_HABER):
-    """Haber sözlüklerini (kaynak, baslik, link, tarih) sıralı listeye çevirir.
-
-    Dönen her sözlükte ek olarak 'puan' ve 'okundu' alanları bulunur.
-    """
-    simdi = simdi or time.time()
+def _puanla_ve_tekille(haberler, profil, simdi):
+    """Ortak ilk adım: puanla, gizlenenleri at, yinelenen linki tekille, puana göre sırala."""
     gizli, okunan = set(profil["gizli"]), set(profil["okunan"])
-
-    # 1) puanla; gizlenenleri at; aynı haber iki kaynaktan geldiyse yüksek puanlıyı tut
     en_iyi, adaylar = {}, []
     for sira, h in enumerate(haberler):
         link = h.get("link") or ""
@@ -122,40 +119,64 @@ def sirala(haberler, profil, simdi=None, azami=AZAMI_HABER):
         adaylar.append(aday)
     adaylar = [a for a in adaylar if not a["link"] or en_iyi[a["link"]] is a]
     adaylar.sort(key=lambda a: (-a["puan"], -(a["tarih"] or 0.0), a["_sira"]))
+    return adaylar
 
-    # 2) en yüksek puanlılar (tek kaynak listeyi doldurmasın diye kaynak başına kota)
-    kaynak_sayisi = len({a["kaynak"] for a in adaylar}) or 1
-    kota = max(6, math.ceil(azami / kaynak_sayisi))
-    ust_sayi = round(azami * UST_ORAN)
-    ust, kalan, sayac = [], [], {}
-    for a in adaylar:
-        if len(ust) < ust_sayi and sayac.get(a["kaynak"], 0) < kota:
-            ust.append(a)
-            sayac[a["kaynak"]] = sayac.get(a["kaynak"], 0) + 1
-        else:
-            kalan.append(a)
 
-    # 3) keşif: ilgisi düşük kalan kaynakların en yeni, okunmamış haberleri
-    kesif_hedef = azami - ust_sayi
-    kesif_adaylari = sorted((a for a in kalan if not a["okundu"]),
-                            key=lambda a: (sayac.get(a["kaynak"], 0), -(a["tarih"] or 0.0), a["_sira"]))
-    kesif, kaynak_adet = [], {}
-    for a in kesif_adaylari:
-        if len(kesif) >= kesif_hedef:
-            break
-        if kaynak_adet.get(a["kaynak"], 0) < KESIF_KAYNAK_BASINA:
-            kesif.append(a)
-            kaynak_adet[a["kaynak"]] = kaynak_adet.get(a["kaynak"], 0) + 1
+def sec_ve_kesfet(haberler, profil, simdi=None):
+    """Haberleri iki ayrı sekmeye böler ve her ikisi için de sıralı bir HAVUZ döner.
 
-    # 4) birleştir: keşif haberleri akışın içine serpiştirilir, boşluk kalırsa sona dolgu eklenir
-    sonuc = list(ust)
-    for i, a in enumerate(kesif):
-        sonuc.insert(min(4 + KESIF_ARALIK * i, len(sonuc)), a)
-    secilenler = {a["_sira"] for a in sonuc}
-    bosluk = azami - len(sonuc)
-    if bosluk > 0:
-        sonuc.extend([a for a in kalan if a["_sira"] not in secilenler][:bosluk])
-    return sonuc
+    Dönen sözlük: {"secilen": [...], "kesif": [...]}. Her liste, ekranda bir
+    sekmede gösterilebilecek olandan daha büyük tutulur (bkz. HAVUZ_SECILEN /
+    HAVUZ_KESIF); ekran bunun bir SAYFA_BOYUTU kadarını gösterir, "Daha Fazla
+    Göster" bir sonraki dilimi açar. Ağa yeniden gidilmez.
+
+    - secilen: tüm adaylar, yalnızca puana göre sıralı (kullanıcı kaynakları
+      zaten kendi seçtiği için kaynak kotası uygulanmaz).
+    - kesif: "secilen" havuzunda az yer bulan/ilgisi düşük kaynaklardan,
+      kaynak başına sınırlı, en güncel haberler (çeşitlilik için).
+    """
+    simdi = simdi or time.time()
+    adaylar = _puanla_ve_tekille(haberler, profil, simdi)
+    secilen = adaylar[:HAVUZ_SECILEN]
+
+    # Keşfet: "Seçilen"in tersine, kaynak kotasıyla sınırlı değil kaynak
+    # ÇEŞİTLİLİĞİ içindir. İlgisi nötr/düşük kaynaklardan (puanı <= 0, yani
+    # henüz sevilmemiş ya da hiç denenmemiş), kaynak başına en fazla
+    # KESIF_KAYNAK_BASINA kadar, en güncel ve okunmamış haber döner.
+    # Tek kaynak seçiliyse keşfedilecek bir şey yoktur (zaten hepsi Seçilen'de).
+    kesif = []
+    tum_kaynaklar = {a["kaynak"] for a in adaylar}
+    if len(tum_kaynaklar) >= 2:
+        kaynak_puan = {a["kaynak"]: profil["kaynak"].get(a["kaynak"], 0.0) for a in adaylar}
+        adaylar_kaynak = [k for k, p in kaynak_puan.items() if p <= 0.0] or list(kaynak_puan)
+        kaynak_sirasi = sorted(adaylar_kaynak, key=lambda k: (kaynak_puan[k], k))
+
+        by_kaynak = {}
+        for a in adaylar:
+            if not a["okundu"]:
+                by_kaynak.setdefault(a["kaynak"], []).append(a)
+        for liste in by_kaynak.values():
+            liste.sort(key=lambda a: (-(a["tarih"] or 0.0), a["_sira"]))
+
+        kaynak_adet = {k: 0 for k in kaynak_sirasi}
+        indeks = {k: 0 for k in kaynak_sirasi}
+        degisti = True
+        while len(kesif) < HAVUZ_KESIF and degisti:
+            degisti = False
+            for k in kaynak_sirasi:
+                if len(kesif) >= HAVUZ_KESIF:
+                    break
+                if kaynak_adet[k] >= KESIF_KAYNAK_BASINA:
+                    continue
+                liste = by_kaynak.get(k, [])
+                i = indeks[k]
+                if i < len(liste):
+                    kesif.append(liste[i])
+                    indeks[k] = i + 1
+                    kaynak_adet[k] += 1
+                    degisti = True
+
+    return {"secilen": secilen, "kesif": kesif}
 
 
 # ---------------------------------------------------------------- öğrenme
